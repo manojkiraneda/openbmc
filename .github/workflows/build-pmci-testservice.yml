@@ -1,0 +1,84 @@
+name: Build and Test PMCI Test Service
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'pmci-testservice/**'
+      - 'meta-phosphor/recipes-phosphor/pmci-testservice/**'
+      - '.github/workflows/build-pmci-testservice.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'pmci-testservice/**'
+      - 'meta-phosphor/recipes-phosphor/pmci-testservice/**'
+      - '.github/workflows/build-pmci-testservice.yml'
+  workflow_dispatch:
+
+jobs:
+  build-with-bitbake:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Free up disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
+        df -h
+        
+    - name: Checkout openbmc repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          gawk wget git diffstat unzip texinfo gcc build-essential \
+          chrpath socat cpio python3 python3-pip python3-pexpect \
+          xz-utils debianutils iputils-ping python3-git python3-jinja2 \
+          libegl1-mesa libsdl1.2-dev pylint xterm python3-subunit \
+          mesa-common-dev zstd liblz4-tool file locales libacl1
+        sudo locale-gen en_US.UTF-8
+        
+    - name: Setup OpenBMC build environment
+      run: |
+        . setup romulus
+        
+    - name: Add pmci-testservice to image
+      run: |
+        cd build/romulus
+        echo 'IMAGE_INSTALL:append = " pmci-testservice"' >> conf/local.conf
+        
+    - name: Build pmci-testservice with BitBake
+      run: |
+        . setup romulus
+        bitbake pmci-testservice
+        
+    - name: Find and run the binary
+      run: |
+        cd build/romulus
+        WORKDIR=$(bitbake -e pmci-testservice | grep "^WORKDIR=" | cut -d'"' -f2)
+        echo "Work directory: $WORKDIR"
+        BINARY=$(find $WORKDIR -name "pmci-testservice" -type f -executable | head -1)
+        if [ -n "$BINARY" ]; then
+          echo "Found binary at: $BINARY"
+          echo "Running pmci-testservice..."
+          $BINARY
+        else
+          echo "Binary not found!"
+          exit 1
+        fi
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: pmci-testservice-bitbake-build
+        path: |
+          build/romulus/tmp/work/*/pmci-testservice/
+          build/romulus/tmp/log/cooker/romulus/
+
+# Made with Bob
